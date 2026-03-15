@@ -2,15 +2,27 @@ import React, { useState, useRef } from 'react';
 import { UploadCloud, CheckCircle2, ChevronRight, X, AlertCircle } from 'lucide-react';
 import { processOrders } from '../services/geminiService';
 import { saveToTodayList, getTodayList } from '../services/storageService';
+import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function InputView() {
+  const { user } = useAuth();
   const [textInput, setTextInput] = useState('');
   const [images, setImages] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [hasActiveList, setHasActiveList] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
+
+  // Check for active list on mount
+  React.useEffect(() => {
+    async function checkList() {
+      const list = await getTodayList(user.uid);
+      setHasActiveList(list.length > 0);
+    }
+    checkList();
+  }, [user.uid]);
 
   const handleImageUpload = (e) => {
     if (e.target.files) {
@@ -34,15 +46,11 @@ export default function InputView() {
     setIsProcessing(true);
 
     try {
-      const parsedItems = await processOrders(textInput, images);
+      const parsedItems = await processOrders(user.uid, textInput, images);
       
       // Combine with existing items if they exist for today
-      const existingItems = getTodayList();
+      const existingItems = await getTodayList(user.uid);
       
-      // Merge logic: we just append to the daily list. 
-      // If we want to merge identical items, we could do it here or let the user view them as separate batches.
-      // For simplicity and safety, we append the batches. But wait, the prompt asks to group things.
-      // Let's just merge by "pasar" and "namaBarang"
       let merged = [...existingItems];
       
       for (const newPasar of parsedItems) {
@@ -59,28 +67,18 @@ export default function InputView() {
           if (!existingBarang) {
             existingPasar.barang.push({ ...newBarang, done: false, price: 0 });
           } else {
-            // Merge pemesan arrays
             for (const newPemesan of newBarang.pemesan) {
-              const existingPemesan = existingBarang.pemesan.find(p => p.restoran.toLowerCase() === newPemesan.restoran.toLowerCase());
-              if (existingPemesan) {
-                // If same resto, just append quantities as string or we assume it's separate. 
-                // Let's just push it since parsing units like "3kg" vs "2 ikat" algorithmically is hard in JS.
-                existingBarang.pemesan.push(newPemesan);
-              } else {
-                existingBarang.pemesan.push(newPemesan);
-              }
+              existingBarang.pemesan.push(newPemesan);
             }
           }
         }
       }
 
-      saveToTodayList(merged);
+      await saveToTodayList(user.uid, merged);
       
-      // Clear forms
       setTextInput('');
       setImages([]);
       
-      // Navigate to Shopping List
       navigate('/list');
 
     } catch (err) {
@@ -94,7 +92,7 @@ export default function InputView() {
     <div className="p-4 bg-bg flex flex-col gap-4 animate-fade-in" style={{ paddingBottom: '7rem' }}>
       <div className="flex justify-between items-center mb-2">
         <h2 className="fs-xl fw-bold">Input Pesanan</h2>
-        {getTodayList().length > 0 && (
+        {hasActiveList && (
           <span className="fs-sm px-2 py-1 bg-primary text-inverse fw-semibold" style={{ borderRadius: 'var(--radius-full)'}}>
             Ada list aktif hari ini
           </span>

@@ -1,23 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { getAllHistoryDates, loadDailyList } from '../services/storageService';
+import { useAuth } from '../contexts/AuthContext';
 import { Calendar, ChevronRight, Store } from 'lucide-react';
 
 export default function HistoryView() {
+  const { user } = useAuth();
   const [historyDates, setHistoryDates] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedList, setSelectedList] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setHistoryDates(getAllHistoryDates());
-  }, []);
+    async function load() {
+      const dates = await getAllHistoryDates(user.uid);
+      setHistoryDates(dates);
+      setLoading(false);
+    }
+    load();
+  }, [user.uid]);
 
-  const handleSelectDate = (dateString) => {
+  const handleSelectDate = async (dateString) => {
     if (selectedDate === dateString) {
       setSelectedDate(null);
       setSelectedList([]);
     } else {
       setSelectedDate(dateString);
-      setSelectedList(loadDailyList(dateString));
+      const data = await loadDailyList(user.uid, dateString);
+      setSelectedList(data);
     }
   };
 
@@ -28,6 +37,14 @@ export default function HistoryView() {
   const calcGrandTotal = (list) => {
     return list.reduce((acc, p) => acc + p.barang.reduce((bAcc, b) => bAcc + (b.price || 0), 0), 0);
   };
+
+  if (loading) {
+    return (
+      <div className="p-4 flex flex-col items-center justify-center h-full animate-fade-in text-center" style={{ paddingTop: '5rem' }}>
+        <span className="text-muted fs-sm">Memuat riwayat...</span>
+      </div>
+    );
+  }
 
   if (historyDates.length === 0) {
     return (

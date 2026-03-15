@@ -1,36 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import { getTodayList, saveToTodayList } from '../services/storageService';
+import { useAuth } from '../contexts/AuthContext';
 import { CheckCircle2, Circle, ChevronDown, ChevronUp, Store } from 'lucide-react';
 
 export default function ShoppingListView() {
+  const { user } = useAuth();
   const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [expandedItems, setExpandedItems] = useState({});
 
   useEffect(() => {
-    setList(getTodayList());
-  }, []);
+    async function load() {
+      const data = await getTodayList(user.uid);
+      setList(data);
+      setLoading(false);
+    }
+    load();
+  }, [user.uid]);
 
-  const handleToggleDone = (pasarIdx, barangIdx) => {
+  const handleToggleDone = async (pasarIdx, barangIdx) => {
     const newList = [...list];
     newList[pasarIdx].barang[barangIdx].done = !newList[pasarIdx].barang[barangIdx].done;
     setList(newList);
-    saveToTodayList(newList);
+    await saveToTodayList(user.uid, newList);
   };
 
-  const handlePriceChange = (pasarIdx, barangIdx, rawPriceInput) => {
+  const handlePriceChange = async (pasarIdx, barangIdx, rawPriceInput) => {
     const newList = [...list];
-    // parse to number safely
     const price = parseInt(rawPriceInput.replace(/[^0-9]/g, ''), 10) || 0;
     newList[pasarIdx].barang[barangIdx].price = price;
     setList(newList);
-    saveToTodayList(newList); // auto-save on change
+    await saveToTodayList(user.uid, newList);
   };
 
   const toggleExpand = (key) => {
     setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Calculations
   const calcTotalPerPasar = (pasar) => {
     return pasar.barang.reduce((acc, b) => acc + (b.price || 0), 0);
   };
@@ -42,6 +48,14 @@ export default function ShoppingListView() {
   const formatRp = (num) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
   };
+
+  if (loading) {
+    return (
+      <div className="p-4 flex flex-col items-center justify-center h-full animate-fade-in text-center" style={{ paddingTop: '5rem' }}>
+        <span className="text-muted fs-sm">Memuat daftar belanja...</span>
+      </div>
+    );
+  }
 
   if (!list || list.length === 0) {
     return (
@@ -82,7 +96,6 @@ export default function ShoppingListView() {
 
               return (
                 <div key={bIdx} className={`card p-0 overflow-hidden transition-all ${barang.done ? 'opacity-60' : ''}`}>
-                  {/* Item Header */}
                   <div className="p-3 flex items-start gap-3">
                     <button 
                       onClick={() => handleToggleDone(pIdx, bIdx)} 
@@ -109,7 +122,6 @@ export default function ShoppingListView() {
                         </div>
                       </div>
 
-                      {/* Expand Restaurants Button */}
                       <button 
                         onClick={() => toggleExpand(itemKey)}
                         className="mt-2 text-muted fs-sm flex items-center gap-1 bg-transparent border-none cursor-pointer p-0"
@@ -120,7 +132,6 @@ export default function ShoppingListView() {
                     </div>
                   </div>
 
-                  {/* Expanded Restaurant Details */}
                   {isExpanded && barang.pemesan && barang.pemesan.length > 0 && (
                     <div className="bg-surface-hover p-3 border-t">
                       <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
