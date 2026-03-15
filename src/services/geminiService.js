@@ -127,7 +127,7 @@ FORMAT OUTPUT HARUS JSON SEPERTI INI (tanpa markdown backticks):
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.1-flash-lite-preview',
       contents: parts,
       config: {
         responseMimeType: "application/json",
