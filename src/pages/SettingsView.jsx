@@ -1,27 +1,27 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   getApiKey, setApiKey,
-  getMarkets, addMarket, deleteMarket,
-  getIngredients, addIngredient, deleteIngredientGlobally, moveIngredientToMarket, updateIngredient,
+  getMarkets, addMarket, updateMarket, deleteMarket,
+  getIngredients, addIngredient, updateIngredient, deleteIngredientGlobally, moveIngredientToMarket,
   getRestaurants, updateRestaurant, deleteRestaurant,
   getRestaurantIngredients, addIngredientToRestaurant, removeIngredientFromRestaurant, updateRestaurantIngredient,
 } from '../services/storageService';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Save, AlertCircle, Plus, Trash2, X, Lock, Unlock, Store, ChevronDown, ChevronUp,
-  ArrowRightLeft, Utensils
+  Utensils, Pencil, Check
 } from 'lucide-react';
 
 export default function SettingsView() {
   const { user } = useAuth();
   const [apiKeyVal, setApiKeyVal] = useState('');
-  const [activeTab, setActiveTab] = useState('markets'); // 'markets' | 'restaurants'
+  const [activeTab, setActiveTab] = useState('markets');
 
   // Data
   const [markets, setMarkets] = useState([]);
   const [ingredients, setIngredients] = useState([]);
   const [restaurants, setRestaurants] = useState([]);
-  const [restaurantIngredients, setRestaurantIngredients] = useState({}); // restId -> [links]
+  const [restaurantIngredients, setRestaurantIngredients] = useState({});
 
   // UI State
   const [newMarketName, setNewMarketName] = useState('');
@@ -31,6 +31,18 @@ export default function SettingsView() {
   const [newIngMarket, setNewIngMarket] = useState('');
   const [loading, setLoading] = useState(true);
   const [savedMessage, setSavedMessage] = useState('');
+
+  // Inline editing state
+  const [editingMarket, setEditingMarket] = useState(null); // marketId
+  const [editingMarketName, setEditingMarketName] = useState('');
+  const [editingIngredient, setEditingIngredient] = useState(null); // ingredientId
+  const [editingIngredientName, setEditingIngredientName] = useState('');
+  const [editingRestaurant, setEditingRestaurant] = useState(null); // restId
+  const [editingRestaurantName, setEditingRestaurantName] = useState('');
+
+  // New ingredient for restaurant (free-text)
+  const [newRestIngName, setNewRestIngName] = useState({});
+  const [newRestIngMarket, setNewRestIngMarket] = useState({});
 
   const loadAllData = useCallback(async () => {
     setLoading(true);
@@ -44,7 +56,6 @@ export default function SettingsView() {
     setRestaurants(r);
     setApiKeyVal(getApiKey());
 
-    // Load restaurant ingredients
     const riMap = {};
     for (const rest of r) {
       riMap[rest.id] = await getRestaurantIngredients(user.uid, rest.id);
@@ -77,17 +88,34 @@ export default function SettingsView() {
     showSaved();
   };
 
+  const handleRenameMarket = async (marketId) => {
+    if (!editingMarketName.trim()) return;
+    await updateMarket(user.uid, marketId, { name: editingMarketName.trim() });
+    setEditingMarket(null);
+    await loadAllData();
+    showSaved('Pasar diubah.');
+  };
+
   const handleDeleteMarket = async (marketId) => {
-    if (!confirm('Hapus pasar ini? Barang tidak akan dihapus, hanya dipindah ke tanpa pasar.')) return;
+    if (!confirm('Hapus pasar ini? Barang tidak dihapus, hanya dipindah ke tanpa pasar.')) return;
     await deleteMarket(user.uid, marketId);
     await loadAllData();
     showSaved('Pasar dihapus.');
   };
 
+  // ─── INGREDIENTS ───
   const handleMoveIngredient = async (ingredientId, newMarketId) => {
     await moveIngredientToMarket(user.uid, ingredientId, newMarketId);
     await loadAllData();
     showSaved('Barang dipindahkan.');
+  };
+
+  const handleRenameIngredient = async (ingredientId) => {
+    if (!editingIngredientName.trim()) return;
+    await updateIngredient(user.uid, ingredientId, { canonicalName: editingIngredientName.trim() });
+    setEditingIngredient(null);
+    await loadAllData();
+    showSaved('Barang diubah.');
   };
 
   const handleDeleteIngredient = async (ingredientId) => {
@@ -111,6 +139,14 @@ export default function SettingsView() {
   };
 
   // ─── RESTAURANTS ───
+  const handleRenameRestaurant = async (restId) => {
+    if (!editingRestaurantName.trim()) return;
+    await updateRestaurant(user.uid, restId, { name: editingRestaurantName.trim() });
+    setEditingRestaurant(null);
+    await loadAllData();
+    showSaved('Restoran diubah.');
+  };
+
   const handleToggleRestaurantLock = async (restId, currentLock) => {
     await updateRestaurant(user.uid, restId, { isLocked: !currentLock });
     await loadAllData();
@@ -135,9 +171,33 @@ export default function SettingsView() {
     showSaved('Barang dihapus dari restoran.');
   };
 
-  const handleAddIngredientToRestaurant = async (restId, ingredientId) => {
-    if (!ingredientId) return;
+  /**
+   * Add ingredient to restaurant — free-text. If the name matches an existing ingredient, link it.
+   * Otherwise create a new ingredient first.
+   */
+  const handleAddIngredientToRestaurantFreeText = async (restId) => {
+    const name = (newRestIngName[restId] || '').trim();
+    if (!name) return;
+
+    // Check if ingredient already exists (case-insensitive)
+    let existing = ingredients.find(i => i.canonicalName.toLowerCase() === name.toLowerCase());
+
+    let ingredientId;
+    if (existing) {
+      ingredientId = existing.id;
+    } else {
+      // Create new ingredient
+      const marketId = newRestIngMarket[restId] || '';
+      ingredientId = await addIngredient(user.uid, {
+        canonicalName: name,
+        aliases: [],
+        marketId,
+      });
+    }
+
     await addIngredientToRestaurant(user.uid, restId, ingredientId);
+    setNewRestIngName({ ...newRestIngName, [restId]: '' });
+    setNewRestIngMarket({ ...newRestIngMarket, [restId]: '' });
     await loadAllData();
     showSaved();
   };
@@ -162,11 +222,8 @@ export default function SettingsView() {
           <p className="fs-sm text-muted mb-3">Disimpan hanya di perangkat ini. Tidak disinkronkan ke cloud.</p>
           <div className="flex gap-2">
             <input 
-              type="password" 
-              className="input" 
-              placeholder="AIzaSy..." 
-              value={apiKeyVal}
-              onChange={(e) => setApiKeyVal(e.target.value)}
+              type="password" className="input" placeholder="AIzaSy..." 
+              value={apiKeyVal} onChange={(e) => setApiKeyVal(e.target.value)}
             />
             <button onClick={handleSaveApiKey} className="btn btn-primary flex items-center gap-1">
               <Save size={16} /> Simpan
@@ -209,54 +266,107 @@ export default function SettingsView() {
           {markets.map(market => {
             const marketIngs = getIngredientsForMarket(market.id);
             const isExpanded = expandedMarket === market.id;
+            const isEditing = editingMarket === market.id;
 
             return (
               <div key={market.id} className="card p-0 overflow-hidden">
                 <div 
                   className="bg-surface-hover p-3 flex justify-between items-center border-b cursor-pointer"
-                  onClick={() => setExpandedMarket(isExpanded ? null : market.id)}
+                  onClick={() => !isEditing && setExpandedMarket(isExpanded ? null : market.id)}
                 >
-                  <span className="fw-bold text-primary flex items-center gap-2">
-                    <Store size={16} /> {market.name}
-                    <span className="text-muted fs-sm fw-medium">({marketIngs.length})</span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteMarket(market.id); }} className="btn-ghost p-1 border-none cursor-pointer">
-                      <Trash2 size={14} className="text-danger" />
-                    </button>
-                    {isExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
-                  </div>
+                  {isEditing ? (
+                    <div className="flex items-center gap-2 flex-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        className="input py-1 px-2 fs-sm"
+                        value={editingMarketName}
+                        onChange={(e) => setEditingMarketName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleRenameMarket(market.id)}
+                        autoFocus
+                      />
+                      <button onClick={() => handleRenameMarket(market.id)} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Check size={16} className="text-success" />
+                      </button>
+                      <button onClick={() => setEditingMarket(null)} className="btn-ghost p-1 border-none cursor-pointer">
+                        <X size={16} className="text-muted" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="fw-bold text-primary flex items-center gap-2">
+                      <Store size={16} /> {market.name}
+                      <span className="text-muted fs-sm fw-medium">({marketIngs.length})</span>
+                    </span>
+                  )}
+                  {!isEditing && (
+                    <div className="flex items-center gap-2">
+                      <button onClick={(e) => { e.stopPropagation(); setEditingMarket(market.id); setEditingMarketName(market.name); }} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Pencil size={14} className="text-muted" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteMarket(market.id); }} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Trash2 size={14} className="text-danger" />
+                      </button>
+                      {isExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
+                    </div>
+                  )}
                 </div>
 
                 {isExpanded && (
                   <div className="p-3">
-                    {marketIngs.length === 0 && <span className="text-muted fs-sm">Belum ada barang di pasar ini.</span>}
+                    {marketIngs.length === 0 && <span className="text-muted fs-sm italic">Belum ada barang di pasar ini.</span>}
                     <div className="flex flex-col gap-2">
-                      {marketIngs.map(ing => (
-                        <div key={ing.id} className="flex justify-between items-center bg-bg border p-2" style={{ borderRadius: 'var(--radius-sm)' }}>
-                          <div>
-                            <span className="fs-sm fw-semibold">{ing.canonicalName}</span>
-                            {ing.aliases?.length > 0 && (
-                              <span className="text-muted fs-sm block">alias: {ing.aliases.join(', ')}</span>
+                      {marketIngs.map(ing => {
+                        const isEditingIng = editingIngredient === ing.id;
+
+                        return (
+                          <div key={ing.id} className="flex justify-between items-center bg-bg border p-2" style={{ borderRadius: 'var(--radius-sm)' }}>
+                            {isEditingIng ? (
+                              <div className="flex items-center gap-2 flex-1">
+                                <input
+                                  type="text"
+                                  className="input py-1 px-2 fs-sm"
+                                  value={editingIngredientName}
+                                  onChange={(e) => setEditingIngredientName(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleRenameIngredient(ing.id)}
+                                  autoFocus
+                                />
+                                <button onClick={() => handleRenameIngredient(ing.id)} className="btn-ghost p-1 border-none cursor-pointer">
+                                  <Check size={14} className="text-success" />
+                                </button>
+                                <button onClick={() => setEditingIngredient(null)} className="btn-ghost p-1 border-none cursor-pointer">
+                                  <X size={14} className="text-muted" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex-1">
+                                <span className="fs-sm fw-semibold">{ing.canonicalName}</span>
+                                {ing.aliases?.length > 0 && (
+                                  <span className="text-muted fs-sm block">alias: {ing.aliases.join(', ')}</span>
+                                )}
+                              </div>
+                            )}
+                            {!isEditingIng && (
+                              <div className="flex items-center gap-1">
+                                <select
+                                  className="input py-1 px-2 fs-sm"
+                                  style={{ width: '110px', height: '28px' }}
+                                  value={ing.marketId}
+                                  onChange={(e) => handleMoveIngredient(ing.id, e.target.value)}
+                                >
+                                  {markets.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                  ))}
+                                </select>
+                                <button onClick={() => { setEditingIngredient(ing.id); setEditingIngredientName(ing.canonicalName); }} className="btn-ghost p-1 border-none cursor-pointer">
+                                  <Pencil size={14} className="text-muted" />
+                                </button>
+                                <button onClick={() => handleDeleteIngredient(ing.id)} className="btn-ghost p-1 border-none cursor-pointer">
+                                  <Trash2 size={14} className="text-danger" />
+                                </button>
+                              </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <select
-                              className="input py-1 px-2 fs-sm"
-                              style={{ width: '120px', height: '28px' }}
-                              value={ing.marketId}
-                              onChange={(e) => handleMoveIngredient(ing.id, e.target.value)}
-                            >
-                              {markets.map(m => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                              ))}
-                            </select>
-                            <button onClick={() => handleDeleteIngredient(ing.id)} className="btn-ghost p-1 border-none cursor-pointer">
-                              <Trash2 size={14} className="text-danger" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -277,7 +387,7 @@ export default function SettingsView() {
                     <div className="flex items-center gap-1">
                       <select
                         className="input py-1 px-2 fs-sm"
-                        style={{ width: '120px', height: '28px' }}
+                        style={{ width: '110px', height: '28px' }}
                         value=""
                         onChange={(e) => handleMoveIngredient(ing.id, e.target.value)}
                       >
@@ -286,6 +396,9 @@ export default function SettingsView() {
                           <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>
+                      <button onClick={() => { setEditingIngredient(ing.id); setEditingIngredientName(ing.canonicalName); }} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Pencil size={14} className="text-muted" />
+                      </button>
                       <button onClick={() => handleDeleteIngredient(ing.id)} className="btn-ghost p-1 border-none cursor-pointer">
                         <Trash2 size={14} className="text-danger" />
                       </button>
@@ -314,7 +427,7 @@ export default function SettingsView() {
             <span className="fs-sm fw-semibold block mb-2">Tambah Barang Baru</span>
             <div className="flex gap-2">
               <input 
-                type="text" className="input py-1 px-2 fs-sm" placeholder="Nama barang..."
+                type="text" className="input py-1 px-2 fs-sm" placeholder="Ketik nama barang..."
                 value={newIngName}
                 onChange={(e) => setNewIngName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddIngredient()}
@@ -349,34 +462,58 @@ export default function SettingsView() {
           {restaurants.map(rest => {
             const links = restaurantIngredients[rest.id] || [];
             const isExpanded = expandedRestaurant === rest.id;
+            const isEditingRest = editingRestaurant === rest.id;
 
             return (
               <div key={rest.id} className="card p-0 overflow-hidden">
                 {/* Restaurant Header */}
                 <div 
                   className="bg-surface-hover p-3 flex justify-between items-center border-b cursor-pointer"
-                  onClick={() => setExpandedRestaurant(isExpanded ? null : rest.id)}
+                  onClick={() => !isEditingRest && setExpandedRestaurant(isExpanded ? null : rest.id)}
                 >
-                  <span className="fw-bold text-primary flex items-center gap-2">
-                    <Utensils size={16} /> {rest.name}
-                    <span className="text-muted fs-sm fw-medium">({links.length} barang)</span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggleRestaurantLock(rest.id, rest.isLocked); }}
-                      className="btn-ghost p-1 border-none cursor-pointer"
-                      title={rest.isLocked ? 'Buka kunci restoran' : 'Kunci restoran'}
-                    >
-                      {rest.isLocked
-                        ? <Lock size={16} className="text-warning" />
-                        : <Unlock size={16} className="text-success" />
-                      }
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteRestaurant(rest.id); }} className="btn-ghost p-1 border-none cursor-pointer">
-                      <Trash2 size={14} className="text-danger" />
-                    </button>
-                    {isExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
-                  </div>
+                  {isEditingRest ? (
+                    <div className="flex items-center gap-2 flex-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        className="input py-1 px-2 fs-sm"
+                        value={editingRestaurantName}
+                        onChange={(e) => setEditingRestaurantName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleRenameRestaurant(rest.id)}
+                        autoFocus
+                      />
+                      <button onClick={() => handleRenameRestaurant(rest.id)} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Check size={16} className="text-success" />
+                      </button>
+                      <button onClick={() => setEditingRestaurant(null)} className="btn-ghost p-1 border-none cursor-pointer">
+                        <X size={16} className="text-muted" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="fw-bold text-primary flex items-center gap-2">
+                      <Utensils size={16} /> {rest.name}
+                      <span className="text-muted fs-sm fw-medium">({links.length} barang)</span>
+                    </span>
+                  )}
+                  {!isEditingRest && (
+                    <div className="flex items-center gap-2">
+                      <button onClick={(e) => { e.stopPropagation(); setEditingRestaurant(rest.id); setEditingRestaurantName(rest.name); }} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Pencil size={14} className="text-muted" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleToggleRestaurantLock(rest.id, rest.isLocked); }}
+                        className="btn-ghost p-1 border-none cursor-pointer"
+                        title={rest.isLocked ? 'Buka kunci restoran' : 'Kunci restoran'}
+                      >
+                        {rest.isLocked
+                          ? <Lock size={16} className="text-warning" />
+                          : <Unlock size={16} className="text-success" />
+                        }
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteRestaurant(rest.id); }} className="btn-ghost p-1 border-none cursor-pointer">
+                        <Trash2 size={14} className="text-danger" />
+                      </button>
+                      {isExpanded ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
+                    </div>
+                  )}
                 </div>
 
                 {isExpanded && (
@@ -387,7 +524,7 @@ export default function SettingsView() {
                       </div>
                     )}
 
-                    {links.length === 0 && <span className="text-muted fs-sm">Belum ada barang.</span>}
+                    {links.length === 0 && <span className="text-muted fs-sm italic">Belum ada barang.</span>}
 
                     {links.map(link => {
                       const ing = getIngredientById(link.ingredientId);
@@ -422,24 +559,27 @@ export default function SettingsView() {
                       );
                     })}
 
-                    {/* Add existing ingredient to restaurant */}
+                    {/* Add ingredient to restaurant — FREE TEXT */}
                     <div className="flex gap-2 mt-2">
-                      <select
-                        id={`add-ing-${rest.id}`}
+                      <input
+                        type="text"
                         className="input py-1 px-2 fs-sm flex-1"
+                        placeholder="Ketik nama barang baru..."
+                        value={newRestIngName[rest.id] || ''}
+                        onChange={(e) => setNewRestIngName({ ...newRestIngName, [rest.id]: e.target.value })}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddIngredientToRestaurantFreeText(rest.id)}
+                      />
+                      <select
+                        className="input py-1 px-2 fs-sm"
+                        style={{ width: '100px' }}
+                        value={newRestIngMarket[rest.id] || ''}
+                        onChange={(e) => setNewRestIngMarket({ ...newRestIngMarket, [rest.id]: e.target.value })}
                       >
-                        <option value="">Tambah barang yang sudah ada...</option>
-                        {ingredients
-                          .filter(i => !links.some(l => l.ingredientId === i.id))
-                          .map(i => <option key={i.id} value={i.id}>{i.canonicalName}</option>)
-                        }
+                        <option value="">Pasar</option>
+                        {markets.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                       </select>
                       <button
-                        onClick={() => {
-                          const el = document.getElementById(`add-ing-${rest.id}`);
-                          handleAddIngredientToRestaurant(rest.id, el.value);
-                          el.value = '';
-                        }}
+                        onClick={() => handleAddIngredientToRestaurantFreeText(rest.id)}
                         className="btn btn-secondary py-1 px-2 fs-sm"
                       >
                         Tambah

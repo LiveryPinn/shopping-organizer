@@ -3,12 +3,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBnUPMteEvp6Maub9AGKpSabchiiX1UDvI",
-  authDomain: "shopping-organizer-a8a38.firebaseapp.com",
-  projectId: "shopping-organizer-a8a38",
-  storageBucket: "shopping-organizer-a8a38.firebasestorage.app",
-  messagingSenderId: "347419962355",
-  appId: "1:347419962355:web:bf8e27a852e0ede328c086"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);

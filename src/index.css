@@ -120,10 +120,15 @@ body {
 .text-primary { color: var(--color-primary); }
 .text-success { color: var(--color-success); }
 .text-danger { color: var(--color-danger); }
-.text-muted { color: var(--color-muted); }
+.text-warning { color: var(--color-warning); }
+.text-muted { color: var(--color-text-muted); }
+.text-inverse { color: var(--color-text-inverse); }
+.italic { font-style: italic; }
+.line-through { text-decoration: line-through; }
 
 .bg-surface { background-color: var(--color-surface); }
 .bg-primary { background-color: var(--color-primary); color: white; }
+.bg-bg { background-color: var(--color-bg); }
 
 .fw-medium { font-weight: 500; }
 .fw-semibold { font-weight: 600; }
