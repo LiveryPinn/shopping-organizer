@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getTodayList, saveToTodayList } from '../services/storageService';
 import { useAuth } from '../contexts/AuthContext';
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, Store } from 'lucide-react';
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, Store, Trash2, X } from 'lucide-react';
 
 export default function ShoppingListView() {
   const { user } = useAuth();
@@ -31,6 +31,43 @@ export default function ShoppingListView() {
     newList[pasarIdx].barang[barangIdx].price = price;
     setList(newList);
     await saveToTodayList(user.uid, newList);
+  };
+
+  // Delete a single item from a market group
+  const handleDeleteItem = async (pasarIdx, barangIdx) => {
+    const newList = [...list];
+    newList[pasarIdx].barang.splice(barangIdx, 1);
+    // If no items left in this market, remove the market group too
+    if (newList[pasarIdx].barang.length === 0) {
+      newList.splice(pasarIdx, 1);
+    }
+    setList(newList);
+    await saveToTodayList(user.uid, newList);
+  };
+
+  // Remove a specific restaurant's order from an item
+  const handleRemovePemesan = async (pasarIdx, barangIdx, pemesanIdx) => {
+    const newList = [...list];
+    const barang = newList[pasarIdx].barang[barangIdx];
+    barang.pemesan.splice(pemesanIdx, 1);
+
+    // If no more pemesan, remove the item entirely
+    if (barang.pemesan.length === 0) {
+      newList[pasarIdx].barang.splice(barangIdx, 1);
+      if (newList[pasarIdx].barang.length === 0) {
+        newList.splice(pasarIdx, 1);
+      }
+    }
+
+    setList(newList);
+    await saveToTodayList(user.uid, newList);
+  };
+
+  // Clear the entire today list
+  const handleClearAll = async () => {
+    if (!confirm('Hapus semua daftar belanja hari ini?')) return;
+    setList([]);
+    await saveToTodayList(user.uid, []);
   };
 
   const toggleExpand = (key) => {
@@ -72,9 +109,18 @@ export default function ShoppingListView() {
       
       <div className="flex justify-between items-center mb-2">
         <h2 className="fs-xl fw-bold">Daftar Belanja Aktif</h2>
-        <span className="fs-sm px-3 py-1 bg-surface border fw-bold text-primary" style={{ borderRadius: 'var(--radius-full)', borderColor: 'var(--color-primary)'}}>
-          {formatRp(calcGrandTotal())}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="fs-sm px-3 py-1 bg-surface border fw-bold text-primary" style={{ borderRadius: 'var(--radius-full)', borderColor: 'var(--color-primary)'}}>
+            {formatRp(calcGrandTotal())}
+          </span>
+          <button
+            onClick={handleClearAll}
+            className="btn-ghost p-1 border-none cursor-pointer"
+            title="Hapus semua"
+          >
+            <Trash2 size={18} className="text-danger" />
+          </button>
+        </div>
       </div>
 
       {list.map((pasar, pIdx) => (
@@ -109,16 +155,23 @@ export default function ShoppingListView() {
                         <span className={`fw-bold fs-md ${barang.done ? 'line-through' : ''}`}>
                           {barang.namaBarang} <span className="text-primary fs-sm">({barang.totalKuantitas})</span>
                         </span>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex gap-1 items-center">
                           <input 
                             type="text" 
                             className="input p-1 px-2 text-right fs-sm" 
-                            style={{ width: '100px', height: '32px' }}
+                            style={{ width: '90px', height: '32px' }}
                             placeholder="Rp 0"
                             value={barang.price ? formatRp(barang.price).replace('Rp', '').trim() : ''}
                             onChange={(e) => handlePriceChange(pIdx, bIdx, e.target.value)}
                             onClick={(e) => e.target.select()}
                           />
+                          <button
+                            onClick={() => handleDeleteItem(pIdx, bIdx)}
+                            className="btn-ghost p-1 border-none cursor-pointer"
+                            title="Hapus barang"
+                          >
+                            <Trash2 size={16} className="text-danger" />
+                          </button>
                         </div>
                       </div>
 
@@ -136,9 +189,18 @@ export default function ShoppingListView() {
                     <div className="bg-surface-hover p-3 border-t">
                       <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
                         {barang.pemesan.map((p, i) => (
-                          <li key={i} className="flex justify-between fs-sm py-1 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
+                          <li key={i} className="flex justify-between items-center fs-sm py-1 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
                             <span className="fw-medium">{p.restoran}</span>
-                            <span className="text-muted fw-bold">{p.kuantitas}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted fw-bold">{p.kuantitas}</span>
+                              <button
+                                onClick={() => handleRemovePemesan(pIdx, bIdx, i)}
+                                className="btn-ghost p-0 border-none cursor-pointer"
+                                title="Hapus restoran ini"
+                              >
+                                <X size={14} className="text-danger" />
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
