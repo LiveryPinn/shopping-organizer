@@ -1,7 +1,7 @@
 import { db } from './firebaseConfig';
 import {
   collection, doc, getDocs, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
-  query, orderBy, writeBatch
+  query, orderBy, writeBatch, runTransaction
 } from 'firebase/firestore';
 
 // ─── API Key (stays in localStorage, never synced) ───
@@ -194,8 +194,33 @@ export async function saveToTodayList(uid, itemsData) {
   await saveDailyList(uid, dateStr, itemsData);
 }
 
-export async function saveDailyList(uid, dateString, itemsData) {
-  await setDoc(userDoc(uid, 'history', dateString), { list: itemsData });
+/**
+ * Save daily list using a Firestore transaction to prevent
+ * concurrent overwrites (last-writer-wins).
+ * Includes a version counter for optimistic concurrency control.
+ */
+export async function saveDailyList(uid, dateString, itemsData, expectedVersion = null) {
+  const docRef = userDoc(uid, 'history', dateString);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(docRef);
+    const currentVersion = snap.exists() ? (snap.data()._version || 0) : 0;
+
+    // If caller provided an expected version, enforce it
+    if (expectedVersion !== null && currentVersion !== expectedVersion) {
+      throw new Error(
+        `Conflict: data was modified by another session. ` +
+        `Expected version ${expectedVersion}, found ${currentVersion}. ` +
+        `Please refresh and try again.`
+      );
+    }
+
+    transaction.set(docRef, {
+      list: itemsData,
+      _version: currentVersion + 1,
+      _updatedAt: new Date().toISOString(),
+    });
+  });
 }
 
 export async function loadDailyList(uid, dateString) {
@@ -204,6 +229,48 @@ export async function loadDailyList(uid, dateString) {
     return snap.data().list || [];
   }
   return [];
+}
+
+/**
+ * Get the current version of a daily list document.
+ * Used for optimistic concurrency in the UI.
+ */
+export async function getDailyListVersion(uid, dateString) {
+  const snap = await getDoc(userDoc(uid, 'history', dateString));
+  if (snap.exists()) {
+    return snap.data()._version || 0;
+  }
+  return 0;
+}
+
+/**
+ * Atomically update a single item field in the daily list
+ * using a transaction. Prevents race conditions for checkbox/price changes.
+ */
+export async function updateDailyListItem(uid, dateString, pasarIdx, barangIdx, updates) {
+  const docRef = userDoc(uid, 'history', dateString);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(docRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+    const list = [...(data.list || [])];
+
+    if (list[pasarIdx] && list[pasarIdx].barang[barangIdx]) {
+      list[pasarIdx].barang[barangIdx] = {
+        ...list[pasarIdx].barang[barangIdx],
+        ...updates,
+      };
+    }
+
+    transaction.set(docRef, {
+      ...data,
+      list,
+      _version: (data._version || 0) + 1,
+      _updatedAt: new Date().toISOString(),
+    });
+  });
 }
 
 export async function getAllHistoryDates(uid) {

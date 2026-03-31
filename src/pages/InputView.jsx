@@ -5,6 +5,34 @@ import { saveToTodayList, getTodayList } from '../services/storageService';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
+/**
+ * Recalculate totalKuantitas from all pemesan entries.
+ * Parses quantity strings like "3kg", "2 pack", "500gr" and sums by unit.
+ * Returns a human-readable aggregate string like "5kg" or "3kg, 2pack".
+ */
+function recalcTotalKuantitas(pemesanList) {
+  const totals = {};
+
+  for (const p of pemesanList) {
+    const raw = (p.kuantitas || '').toString().trim().toLowerCase();
+    // Extract number and unit from strings like "3kg", "2 pack", "500 gr"
+    const match = raw.match(/^([\d.,]+)\s*(.*)$/);
+    if (match) {
+      const num = parseFloat(match[1].replace(',', '.')) || 0;
+      const unit = match[2].trim() || 'pcs';
+      totals[unit] = (totals[unit] || 0) + num;
+    }
+  }
+
+  const parts = Object.entries(totals).map(([unit, qty]) => {
+    // Format: remove trailing zeros (3.0 -> 3, 2.5 stays 2.5)
+    const formatted = Number.isInteger(qty) ? qty.toString() : qty.toFixed(1);
+    return `${formatted}${unit}`;
+  });
+
+  return parts.join(', ') || '?';
+}
+
 export default function InputView() {
   const { user } = useAuth();
   const [textInput, setTextInput] = useState('');
@@ -70,6 +98,8 @@ export default function InputView() {
             for (const newPemesan of newBarang.pemesan) {
               existingBarang.pemesan.push(newPemesan);
             }
+            // ── RECALCULATE totalKuantitas from all pemesan entries ──
+            existingBarang.totalKuantitas = recalcTotalKuantitas(existingBarang.pemesan);
           }
         }
       }

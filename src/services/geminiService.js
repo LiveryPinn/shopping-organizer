@@ -160,10 +160,10 @@ FORMAT OUTPUT HARUS JSON SEPERTI INI (tanpa markdown backticks):
 
 /**
  * Post-process AI results:
- * - Auto-create new restaurant entries
- * - Auto-create new ingredients (with fuzzy matching)
- * - Link ingredients to restaurants
- * - Add aliases when fuzzy match found
+ * - Collects proposed changes as a review list
+ * - Enforces isLocked on both restaurants AND ingredients
+ * - Only auto-links ingredients to unlocked restaurants
+ * - Returns proposals for new ingredients/aliases for user confirmation
  */
 async function postProcessResults(uid, results, markets, existingIngredients, existingRestaurants) {
   // Collect all unique restaurant names from the results
@@ -182,10 +182,21 @@ async function postProcessResults(uid, results, markets, existingIngredients, ex
     restaurantMap[rest.name.toLowerCase()] = rest;
   }
 
+  // Track proposals for user review
+  const proposals = {
+    newRestaurants: [],
+    newIngredients: [],
+    newAliases: [],
+    newLinks: [],
+    skippedLocked: [],
+  };
+
   for (const restoName of mentionedRestaurants) {
     if (!restaurantMap[restoName.toLowerCase()]) {
       const newId = await addRestaurant(uid, restoName);
-      restaurantMap[restoName.toLowerCase()] = { id: newId, name: restoName, isLocked: false };
+      const newRest = { id: newId, name: restoName, isLocked: false };
+      restaurantMap[restoName.toLowerCase()] = newRest;
+      proposals.newRestaurants.push(restoName);
     }
   }
 
@@ -209,13 +220,28 @@ async function postProcessResults(uid, results, markets, existingIngredients, ex
       if (match) {
         ingredientId = match.ingredient.id;
 
-        // If the original name is different, add it as an alias
-        if (originalName.toLowerCase() !== match.ingredient.canonicalName.toLowerCase() &&
-            !(match.ingredient.aliases || []).some(a => a.toLowerCase() === originalName.toLowerCase())) {
-          const updatedAliases = [...(match.ingredient.aliases || []), originalName];
-          await updateIngredient(uid, ingredientId, { aliases: updatedAliases });
-          // Update local copy
-          match.ingredient.aliases = updatedAliases;
+        // ── ENFORCE INGREDIENT LOCK ──
+        // Check if this ingredient is locked before modifying aliases
+        if (match.ingredient.isLocked) {
+          proposals.skippedLocked.push({
+            type: 'ingredient',
+            name: match.ingredient.canonicalName,
+            attemptedAlias: originalName,
+          });
+          // Still use the matched ID for linking, but don't modify the ingredient
+        } else {
+          // If the original name is different, add it as an alias
+          if (originalName.toLowerCase() !== match.ingredient.canonicalName.toLowerCase() &&
+              !(match.ingredient.aliases || []).some(a => a.toLowerCase() === originalName.toLowerCase())) {
+            const updatedAliases = [...(match.ingredient.aliases || []), originalName];
+            await updateIngredient(uid, ingredientId, { aliases: updatedAliases });
+            // Update local copy
+            match.ingredient.aliases = updatedAliases;
+            proposals.newAliases.push({
+              ingredient: match.ingredient.canonicalName,
+              alias: originalName,
+            });
+          }
         }
       } else {
         // New ingredient — create it
@@ -229,6 +255,12 @@ async function postProcessResults(uid, results, markets, existingIngredients, ex
           canonicalName: rawName,
           aliases: originalName !== rawName ? [originalName] : [],
           marketId,
+          isLocked: false,
+        });
+        proposals.newIngredients.push({
+          name: rawName,
+          alias: originalName !== rawName ? originalName : null,
+          market: market?.name || 'Belum diatur',
         });
       }
 
@@ -237,8 +269,21 @@ async function postProcessResults(uid, results, markets, existingIngredients, ex
         const restData = restaurantMap[pemesan.restoran.toLowerCase()];
         if (restData && !restData.isLocked) {
           await addIngredientToRestaurant(uid, restData.id, ingredientId);
+          proposals.newLinks.push({
+            ingredient: rawName,
+            restaurant: restData.name,
+          });
+        } else if (restData && restData.isLocked) {
+          proposals.skippedLocked.push({
+            type: 'restaurant',
+            name: restData.name,
+            attemptedLink: rawName,
+          });
         }
       }
     }
   }
+
+  // Attach proposals to the results for UI display
+  results._proposals = proposals;
 }
